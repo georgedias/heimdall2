@@ -22,13 +22,15 @@ beforeEach(function () {
 // "Uncaught TypeError: Cannot read property 'getBoundingClientRect' of undefined"
 // On a null-obj
 Cypress.on('uncaught:exception', (err) => {
-  // Return false if the error messaage includes `getBoundingClientRect`
+  // Return false if the error message includes `getBoundingClientRect`
   return !err.message.includes('getBoundingClientRect');
 });
 
 Cypress.Commands.add('login', ({email, password}) => {
-  cy.get('input[name=email]').clear().type(email);
-  cy.get('input[name=password]').clear().type(password);
+  cy.get('input[name=email]').clear();
+  cy.get('input[name=email]').type(email);
+  cy.get('input[name=password]').clear();
+  cy.get('input[name=password]').type(password);
   cy.get('#login_button').click();
 });
 

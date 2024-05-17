@@ -1,23 +1,22 @@
+import * as XLSX from '@e965/xlsx';
 import {ExecJSON} from 'inspecjs';
 import {
   AttestationData,
-  ControlResultStatus
+  ControlResultStatus,
+  ControlAttestationStatus
 } from 'inspecjs/src/generated_parsers/v_1_0/exec-json';
-import _ from 'lodash';
+import * as _ from 'lodash';
 import moment from 'moment';
-import ms from 'ms';
-import XLSX from 'xlsx';
 
-export type Attestation = {
-  control_id: string;
-  explanation: string;
-  frequency: string;
-  status: 'passed' | 'failed';
-  updated: string;
-  updated_by: string;
+// Convert from using enum type to enum values
+export type Attestation = Omit<AttestationData, 'status'> & {
+  status: `${ControlAttestationStatus}`;
 };
 
-function advanceDate(date: moment.Moment, frequency: string): moment.Moment {
+export function advanceDate(
+  date: moment.Moment,
+  frequency: string
+): moment.Moment {
   switch (frequency) {
     case 'annually':
       date.add(1, 'year');
@@ -34,21 +33,59 @@ function advanceDate(date: moment.Moment, frequency: string): moment.Moment {
     case 'every2weeks':
       date.add(2, 'weeks');
       break;
+    case 'fortnightly':
+      date.add(2, 'weeks');
+      break;
     case 'weekly':
       date.add(1, 'week');
+      break;
+    case 'every3days':
+      date.add(3, 'day');
       break;
     case 'daily':
       date.add(1, 'day');
       break;
-    default:
-      date.add(ms(frequency), 'milliseconds');
-      break;
-  }
+    default: {
+      // a number followed by d/w/m/y, with or without spaces in between
+      // 10 character limit on number of digits and characters to prevent security issues with regex
+      const re = /(\d{1,10}(?:.\d{0,10})?)(\s{0,10})([a-z])/;
+      const match = re.exec(frequency);
 
+      if (!match) {
+        throw new Error(
+          'Unknown date format: ' +
+            frequency +
+            '. Please use a number followed by d/w/m/y to indicate days, weeks, months, or years, e.g. 1d/2w/3m/1y/custom.'
+        );
+      }
+
+      const number = match[1];
+      const unit = match[3];
+      // add inputted amount of time
+      switch (unit) {
+        case 'd':
+          date.add(number, 'days');
+          break;
+        case 'w':
+          date.add(number, 'weeks');
+          break;
+        case 'm':
+          date.add(number, 'months');
+          break;
+        case 'y':
+          date.add(number, 'years');
+          break;
+      }
+      break;
+    }
+  }
   return date;
 }
 
-function createAttestationMessage(attestation: Attestation, expired: boolean) {
+export function createAttestationMessage(
+  attestation: Attestation,
+  expired: boolean
+) {
   let message = '';
 
   if (expired) {
@@ -93,7 +130,7 @@ export function convertAttestationToSegment(
     return {
       code_desc: 'Manually verified status provided through attestation',
       status: attestation.status as ControlResultStatus,
-      message: createAttestationMessage(attestation, true),
+      message: createAttestationMessage(attestation, false),
       start_time: new Date().toISOString()
     };
   }
@@ -103,12 +140,13 @@ export function addAttestationToHDF(
   hdf: ExecJSON.Execution,
   attestations: Attestation[]
 ): ExecJSON.Execution {
-  for (const profile of hdf.profiles) {
-    for (const control of profile.controls) {
-      for (const attestation of attestations) {
-        if (attestation.control_id.toLowerCase() === control.id.toLowerCase()) {
+  for (const attestation of attestations) {
+    let found_control = false;
+    for (const profile of hdf.profiles) {
+      for (const control of profile.controls) {
+        if (attestationCanBeAdded(attestation, control)) {
+          found_control = true;
           if (['passed', 'failed'].includes(attestation.status)) {
-            // Attestation status is expecting type enum Status (failed, passed), however we just have a string status which can only be (failed or passed)
             control.attestation_data =
               attestation as unknown as AttestationData;
             control.results.push(convertAttestationToSegment(attestation));
@@ -120,8 +158,12 @@ export function addAttestationToHDF(
         }
       }
     }
+    if (!found_control) {
+      console.error(
+        `Control ${attestation.control_id} not found in HDF. Skipping attestation.`
+      );
+    }
   }
-
   return hdf;
 }
 
@@ -133,9 +175,10 @@ export async function parseXLSXAttestations(
       cellDates: true
     });
     const sheet = workbook.Sheets['attestations'];
-    const data: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet);
+    const data: Record<string, Date | string>[] =
+      XLSX.utils.sheet_to_json(sheet);
     const attestations: Attestation[] = data.map((attestation) => {
-      const lowerAttestation = _.mapKeys(attestation, (v, k) => {
+      const lowerAttestation = _.mapKeys(attestation, (_v, k) => {
         return k.toLowerCase().replace(/\s/g, '_');
       });
       return {
@@ -155,8 +198,26 @@ export async function parseXLSXAttestations(
   });
 }
 
+function attestationCanBeAdded(
+  attestation: Attestation,
+  control: ExecJSON.Control
+) {
+  if (attestation.control_id.toLowerCase() === control.id.toLowerCase()) {
+    if (control.results[0].status === 'skipped') {
+      return true;
+    } else {
+      console.error(
+        'Invalid control selected: Control must have "skipped" status to be attested'
+      );
+      return false;
+    }
+  } else {
+    return false;
+  }
+}
+
 function getFirstPath(
-  object: Record<string, unknown>,
+  object: Record<string, string | Date>,
   paths: string[]
 ): string {
   const index = _.findIndex(paths, (p) => hasPath(object, p));
@@ -165,9 +226,12 @@ function getFirstPath(
     throw new Error(
       `Attestation is missing one of these paths: ${paths.join(', ')}`
     );
-  } else {
-    return _.get(object, paths[index]) as string;
   }
+  const stringOrDate = _.get(object, paths[index]);
+  if (_.isString(stringOrDate)) {
+    return stringOrDate;
+  }
+  return `${stringOrDate.getFullYear()}-${String(stringOrDate.getMonth() + 1).padStart(2, '0')}-${String(stringOrDate.getDate()).padStart(2, '0')}`;
 }
 
 function hasPath(

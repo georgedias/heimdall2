@@ -5,17 +5,21 @@ on:
 
 jobs:
   build-deploy:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-22.04
+    env:
+      NODE_ENV: production
     steps:
-      - uses: actions/checkout@master
+      - uses: actions/checkout@v4
 
       - name: setup node
-        uses: actions/setup-node@v1
+        uses: actions/setup-node@v4
         with:
-          node-version: "14.x"
+          node-version: "18"
+          check-latest: true
+          cache: 'yarn'
 
       - name: Install project dependencies
-        run: yarn frontend install --frozen-lockfile
+        run: yarn frontend install --frozen-lockfile --production
 
       - name: Build Heimdall Lite
         run: yarn frontend build

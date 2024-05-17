@@ -10,11 +10,16 @@ import 'roboto-fontface/css/roboto/roboto-fontface.css';
 import Vue from 'vue';
 import VueCookies from 'vue-cookies';
 import Vuetify from 'vuetify/lib';
+import {Resize} from 'vuetify/lib/directives';
 
 Vue.config.productionTip = false;
 
 Vue.use(VueCookies);
-Vue.use(Vuetify);
+Vue.use(Vuetify, {
+  directives: {
+    Resize
+  }
+});
 
 new Vue({
   router,
@@ -39,9 +44,12 @@ new Vue({
   render: (h) => h(App)
 }).$mount('#app');
 
-// The following line is a hot patch to add regex support, theyre are better
+// The following line is a hot patch to add regex support, there are better
 // places to edit Prism variables, but could not locate them. Namely this is
 // the Prism library variables, and not the Prism component variables
 //@ts-ignore
-Prism.languages.rb.string[1].pattern =
-  /("|')(\1|(?:(?![^\\]\1)[\s\S])*[^\\]\1)/g;
+Prism.languages['rb'] = {
+  'token-name': {
+    pattern: /(["'])(\1|(?:(?![^\\]\1)[\s\S])*[^\\]\1)/g
+  }
+};

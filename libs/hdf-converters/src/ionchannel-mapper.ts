@@ -1,6 +1,6 @@
 import axios, {AxiosInstance} from 'axios';
 import {ExecJSON} from 'inspecjs';
-import _ from 'lodash';
+import * as _ from 'lodash';
 import {version as HeimdallToolsVersion} from '../package.json';
 import {
   ContextualizedDependency,
@@ -11,7 +11,10 @@ import {
 import {Project} from '../types/ionchannelProjects';
 import {Team} from '../types/ionchannelTeams';
 import {BaseConverter, ILookupPath, MappedTransform} from './base-converter';
-import {DEFAULT_INFORMATION_SYSTEM_COMPONENT_MANAGEMENT_NIST_TAGS} from './utils/global';
+import {
+  DEFAULT_INFORMATION_SYSTEM_COMPONENT_MANAGEMENT_NIST_TAGS,
+  getCCIsForNISTTags
+} from './utils/global';
 
 // Extracts all levels of dependencies from any dependency (including sub-dependencies)
 function extractAllDependencies(
@@ -123,9 +126,8 @@ export class IonChannelAPIMapper {
     this.analysisId = analysisId;
 
     this.apiClient = axios.create();
-    this.apiClient.defaults.headers.common[
-      'Authorization'
-    ] = `Bearer ${this.apiKey}`;
+    this.apiClient.defaults.headers.common['Authorization'] =
+      `Bearer ${this.apiKey}`;
     this.apiClient.defaults.headers.common['Accept'] =
       'application/json, text/plain, */*';
   }
@@ -264,13 +266,19 @@ export class IonChannelMapper extends BaseConverter {
                   ? {
                       ..._.omit(dependency, 'dependencies'),
                       nist: DEFAULT_INFORMATION_SYSTEM_COMPONENT_MANAGEMENT_NIST_TAGS,
+                      cci: getCCIsForNISTTags(
+                        DEFAULT_INFORMATION_SYSTEM_COMPONENT_MANAGEMENT_NIST_TAGS
+                      ),
                       dependencies: dependency.dependencies.map(
                         (subDependency) => `${subDependency.name}`
                       )
                     }
                   : {
                       ..._.omit(dependency, 'dependencies'),
-                      nist: DEFAULT_INFORMATION_SYSTEM_COMPONENT_MANAGEMENT_NIST_TAGS
+                      nist: DEFAULT_INFORMATION_SYSTEM_COMPONENT_MANAGEMENT_NIST_TAGS,
+                      cci: getCCIsForNISTTags(
+                        DEFAULT_INFORMATION_SYSTEM_COMPONENT_MANAGEMENT_NIST_TAGS
+                      )
                     };
               }
             },

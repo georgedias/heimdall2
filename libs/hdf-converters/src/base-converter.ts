@@ -1,8 +1,8 @@
 import {createHash} from 'crypto';
-import parser from 'fast-xml-parser';
+import {XMLParser} from 'fast-xml-parser';
 import * as htmlparser from 'htmlparser2';
 import {ExecJSON} from 'inspecjs';
-import _ from 'lodash';
+import * as _ from 'lodash';
 import Papa from 'papaparse';
 
 export interface ILookupPath {
@@ -20,17 +20,17 @@ export type MappedTransform<T, U extends ILookupPath> = {
   [K in keyof T]: Exclude<T[K], undefined | null> extends Array<any>
     ? MappedTransform<T[K], U>
     : T[K] extends Function
-    ? T[K]
-    : T[K] extends object
-    ? MappedTransform<T[K] & U, U>
-    : T[K] | U;
+      ? T[K]
+      : T[K] extends object
+        ? MappedTransform<T[K] & U, U>
+        : T[K] | U;
 };
 export type MappedReform<T, U> = {
   [K in keyof T]: Exclude<T[K], undefined | null> extends Array<any>
     ? MappedReform<T[K], U>
     : T[K] extends object
-    ? MappedReform<T[K] & U, U>
-    : Exclude<T[K], U>;
+      ? MappedReform<T[K] & U, U>
+      : Exclude<T[K], U>;
 };
 /* eslint-enable @typescript-eslint/ban-types */
 
@@ -54,13 +54,22 @@ export function parseHtml(input: unknown): string {
   return textData.join('');
 }
 
-export function parseXml(xml: string): Record<string, unknown> {
+export function parseXml(
+  xml: string,
+  additionalOptions?: Record<string, unknown>
+): Record<string, unknown> {
   const options = {
     attributeNamePrefix: '',
     textNodeName: 'text',
-    ignoreAttributes: false
+    ignoreAttributes: false,
+    ignoreDeclaration: true,
+    parseAttributeValue: false,
+    parseTagValue: false,
+    removeNSPrefix: true,
+    ...additionalOptions
   };
-  return parser.parse(xml, options);
+  const parser = new XMLParser(options);
+  return parser.parse(xml);
 }
 
 export function parseCsv(csv: string): unknown[] {
@@ -146,11 +155,13 @@ export class BaseConverter {
     this.data = data;
     this.collapseResults = collapseResults;
   }
+
   setMappings(
     mappings: MappedTransform<ExecJSON.Execution, ILookupPath>
   ): void {
     this.mappings = mappings;
   }
+
   toHdf(): ExecJSON.Execution {
     if (this.mappings === undefined) {
       throw new Error('Mappings must be provided');
@@ -163,12 +174,12 @@ export class BaseConverter {
     }
   }
 
-  objectMap<T, V>(
+  objectMap<T extends Array<unknown>, V>(
     obj: T,
     fn: (v: ObjectEntryValue<T>) => V
   ): {[K in keyof T]: V} {
     return Object.fromEntries(
-      Object.entries(obj).map(([k, v]) => [k, fn(v)])
+      Object.entries(obj).map(([k, v]) => [k, fn(v as ObjectEntryValue<T>)])
     ) as Record<keyof T, V>;
   }
   convertInternal<T>(
@@ -187,8 +198,8 @@ export class BaseConverter {
       >;
     }
 
-    const result = this.objectMap(fields, (v: ObjectEntryValue<T>) =>
-      this.evaluate(file, v)
+    const result = this.objectMap(fields as T[], (v) =>
+      this.evaluate(file, v as T & object & ILookupPath)
     );
     return result as MappedReform<T, ILookupPath>;
   }
@@ -201,7 +212,7 @@ export class BaseConverter {
       _.has(v, 'transformer') && _.isFunction(_.get(v, 'transformer'));
     let transformer = (val: unknown) => val;
     if (hasTransformer) {
-      transformer = _.get(v, 'transformer');
+      transformer = _.get(v, 'transformer') as any;
       v = _.omit(v as object, 'transformer') as T;
     }
 
@@ -213,7 +224,7 @@ export class BaseConverter {
       f?: Record<string, unknown>
     ) => T | T[] = (val: T | T[]) => val;
     if (haspathTransform) {
-      pathTransform = _.get(v, 'pathTransform');
+      pathTransform = _.get(v, 'pathTransform') as any;
       v = _.omit(v as object, 'pathTransform') as T;
     }
 
@@ -221,7 +232,10 @@ export class BaseConverter {
     let pathV = v;
     if (hasPath) {
       pathV = pathTransform(
-        this.handlePath(file, _.get(v, 'path') as string | string[]) as T | T[],
+        this.handlePath(
+          file,
+          _.get(v, 'path') as unknown as string | string[]
+        ) as T | T[],
         file
       );
       v = _.omit(v as object, 'path') as T;
@@ -239,7 +253,7 @@ export class BaseConverter {
     if (Array.isArray(pathV)) {
       return hasTransformer
         ? (transformer(pathV) as T[])
-        : this.handleArray(file, pathV);
+        : this.handleArray(file, pathV as any);
     }
 
     if (_.keys(v).length > 0 && hasTransformer) {
@@ -281,9 +295,7 @@ export class BaseConverter {
             : element;
         });
         let output: Array<T> = [];
-        v.forEach((element) => {
-          output.push(this.evaluate(file, element) as T);
-        });
+        output.push(this.evaluate(file, lookupPath) as T);
         if (arrayTransformer !== undefined) {
           if (Array.isArray(arrayTransformer)) {
             output = arrayTransformer[0].apply(arrayTransformer[1], [
@@ -315,7 +327,7 @@ export class BaseConverter {
                 'key',
                 'pathTransform'
               ]) as unknown as T;
-            });
+            }) as any;
             if (arrayTransformer !== undefined) {
               if (Array.isArray(arrayTransformer)) {
                 v = arrayTransformer[0].apply(arrayTransformer[1], [
@@ -323,7 +335,7 @@ export class BaseConverter {
                   this.data
                 ]);
               } else {
-                v = arrayTransformer.apply(null, [v, this.data]) as T[];
+                v = arrayTransformer.apply(null, [v, this.data]) as any;
               }
             }
             if (key !== undefined) {
@@ -340,15 +352,7 @@ export class BaseConverter {
       }
     }
 
-    const uniqueResults: T[] = [];
-    resultingData.forEach((result) => {
-      if (
-        !uniqueResults.some((uniqueResult) => _.isEqual(result, uniqueResult))
-      ) {
-        uniqueResults.push(result);
-      }
-    });
-    return uniqueResults;
+    return resultingData;
   }
 
   handlePath(file: Record<string, unknown>, path: string | string[]): unknown {

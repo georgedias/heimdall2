@@ -1,5 +1,5 @@
 import {ExecJSON} from 'inspecjs';
-import _ from 'lodash';
+import * as _ from 'lodash';
 import {version as HeimdallToolsVersion} from '../package.json';
 import {
   BaseConverter,
@@ -7,6 +7,10 @@ import {
   impactMapping,
   MappedTransform
 } from './base-converter';
+import {
+  DEFAULT_UPDATE_REMEDIATION_NIST_TAGS,
+  getCCIsForNISTTags
+} from './utils/global';
 
 const IMPACT_MAPPING: Map<string, number> = new Map([
   ['critical', 0.9],
@@ -16,6 +20,22 @@ const IMPACT_MAPPING: Map<string, number> = new Map([
   ['moderate', 0.5],
   ['low', 0.3]
 ]);
+
+export class TwistlockResults {
+  data: Record<string, unknown>;
+  withRaw: boolean;
+  constructor(twistlockJson: string, withRaw = false) {
+    this.data = JSON.parse(twistlockJson);
+    this.withRaw = withRaw;
+  }
+
+  toHdf(): ExecJSON.Execution {
+    if (!_.has(this.data, 'results')) {
+      this.data = {results: [this.data]};
+    }
+    return new TwistlockMapper(this.data, this.withRaw).toHdf();
+  }
+}
 
 export class TwistlockMapper extends BaseConverter {
   withRaw: boolean;
@@ -27,7 +47,7 @@ export class TwistlockMapper extends BaseConverter {
     platform: {
       name: 'Heimdall Tools',
       release: HeimdallToolsVersion,
-      target_id: {path: 'results[0].name'}
+      target_id: {path: ['results[0].name', 'results[0].repository']}
     },
     version: HeimdallToolsVersion,
     statistics: {},
@@ -37,9 +57,13 @@ export class TwistlockMapper extends BaseConverter {
         name: 'Twistlock Scan',
         title: {
           transformer: (data: Record<string, unknown>): string => {
-            const projectArr = _.has(data, 'collections')
-              ? _.get(data, 'collections')
-              : 'N/A';
+            let projectArr: unknown = 'N/A';
+            if (_.has(data, 'collections')) {
+              projectArr = _.get(data, 'collections');
+            }
+            if (_.has(data, 'repository')) {
+              projectArr = _.get(data, 'repository');
+            }
             const projectName = Array.isArray(projectArr)
               ? projectArr.join(' / ')
               : projectArr;
@@ -67,9 +91,10 @@ export class TwistlockMapper extends BaseConverter {
           {
             path: 'vulnerabilities',
             key: 'id',
+            pathTransform: (value) => (Array.isArray(value) ? value : []),
             tags: {
-              nist: ['SI-2', 'RA-5'],
-              cci: ['CCI-002605', 'CCI-001643'],
+              nist: DEFAULT_UPDATE_REMEDIATION_NIST_TAGS,
+              cci: getCCIsForNISTTags(DEFAULT_UPDATE_REMEDIATION_NIST_TAGS),
               cveid: {path: 'id'}
             },
             refs: [],
@@ -148,8 +173,8 @@ export class TwistlockMapper extends BaseConverter {
       }
     }
   };
-  constructor(twistlockJson: string, withRaw = false) {
-    super(JSON.parse(twistlockJson), true);
+  constructor(twistlockJson: Record<string, unknown>, withRaw = false) {
+    super(twistlockJson, true);
     this.withRaw = withRaw;
   }
 }

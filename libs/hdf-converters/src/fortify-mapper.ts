@@ -1,5 +1,5 @@
 import {ExecJSON} from 'inspecjs';
-import _ from 'lodash';
+import * as _ from 'lodash';
 import {version as HeimdallToolsVersion} from '../package.json';
 import {
   BaseConverter,
@@ -8,6 +8,7 @@ import {
   parseHtml,
   parseXml
 } from './base-converter';
+import {getCCIsForNISTTags} from './utils/global';
 
 const NIST_REFERENCE_NAME =
   'Standards Mapping - NIST Special Publication 800-53 Revision 4';
@@ -48,7 +49,7 @@ function processEntry(input: unknown): string {
   output.push(`\nPath: ${_.get(input, 'File')}\n`);
   output.push(`StartLine: ${_.get(input, 'StartLine')}, `);
   output.push(`EndLine: ${_.get(input, 'EndLine')}\n`);
-  output.push(`Code:\n${_.get(input, 'Text').trim()}`);
+  output.push(`Code:\n${(_.get(input, 'Text') as unknown as string).trim()}`);
 
   return output.join('');
 }
@@ -65,44 +66,50 @@ function filterVuln(input: unknown[], file: unknown): ExecJSON.Control[] {
       _.set(
         element,
         'results',
-        _.get(element, 'results').filter((result: ExecJSON.ControlResult) => {
-          const codedesc = _.get(result, 'code_desc').split('<=SNIPPET');
-          const snippetid = codedesc[0];
-          const classid = _.get(element, 'id');
-          _.set(result, 'code_desc', codedesc[1]);
+        (_.get(element, 'results') as any).filter(
+          (result: ExecJSON.ControlResult) => {
+            const codedesc = _.get(result, 'code_desc').split('<=SNIPPET');
+            const snippetid = codedesc[0];
+            const classid = _.get(element, 'id');
+            _.set(result, 'code_desc', codedesc[1]);
 
-          let isMatch = false;
-          const matches = _.get(
-            file,
-            'FVDL.Vulnerabilities.Vulnerability'
-          ).filter((subElement: Record<string, unknown>) => {
-            return _.get(subElement, 'ClassInfo.ClassID') === classid;
-          });
-          matches.forEach((match: Record<string, unknown>) => {
-            const traces: unknown[] = makeArray(
-              _.get(match, 'AnalysisInfo.Unified.Trace')
-            );
-            traces.forEach((trace: unknown) => {
-              const entries: unknown[] = makeArray(
-                _.get(trace, 'Primary.Entry')
+            let isMatch = false;
+            const matches = (
+              _.get(file, 'FVDL.Vulnerabilities.Vulnerability') as any
+            ).filter((subElement: Record<string, unknown>) => {
+              return _.get(subElement, 'ClassInfo.ClassID') === classid;
+            });
+            matches.forEach((match: Record<string, unknown>) => {
+              const traces: unknown[] = makeArray(
+                _.get(match, 'AnalysisInfo.Unified.Trace')
               );
-              const filteredEntries = entries.filter((entry: unknown) => {
-                return _.has(entry, 'Node.SourceLocation.snippet');
-              });
-              filteredEntries.forEach((entry: unknown) => {
-                if (_.get(entry, 'Node.SourceLocation.snippet') === snippetid) {
-                  isMatch = true;
-                }
+              traces.forEach((trace: unknown) => {
+                const entries: unknown[] = makeArray(
+                  _.get(trace, 'Primary.Entry')
+                );
+                const filteredEntries = entries.filter((entry: unknown) => {
+                  return _.has(entry, 'Node.SourceLocation.snippet');
+                });
+                filteredEntries.forEach((entry: unknown) => {
+                  if (
+                    _.get(entry, 'Node.SourceLocation.snippet') === snippetid
+                  ) {
+                    isMatch = true;
+                  }
+                });
               });
             });
-          });
-          return isMatch;
-        })
+            return isMatch;
+          }
+        )
       );
       _.set(
         element,
         'impact',
-        impactMapping(_.get(element, 'impact'), _.get(element, 'id'))
+        impactMapping(
+          _.get(element, 'impact') as unknown as Record<string, unknown>,
+          _.get(element, 'id') as unknown as string
+        )
       );
     }
     return element;
@@ -112,34 +119,31 @@ function filterVuln(input: unknown[], file: unknown): ExecJSON.Control[] {
 
 export class FortifyMapper extends BaseConverter {
   startTime: string;
-  mappings: MappedTransform<ExecJSON.Execution, ILookupPath> = {
+  withRaw: boolean;
+
+  mappings: MappedTransform<
+    ExecJSON.Execution & {passthrough: unknown},
+    ILookupPath
+  > = {
     platform: {
       name: 'Heimdall Tools',
-      release: HeimdallToolsVersion,
-      target_id: ''
+      release: HeimdallToolsVersion
     },
     version: HeimdallToolsVersion,
-    statistics: {
-      duration: null
-    },
+    statistics: {},
     profiles: [
       {
         name: 'Fortify Static Analyzer Scan',
         version: {path: 'FVDL.EngineData.EngineVersion'},
         title: 'Fortify Static Analyzer Scan',
-        maintainer: null,
         summary: {
           path: 'FVDL.UUID',
           transformer: (uuid: unknown): string => {
             return `Fortify Static Analyzer Scan of UUID: ${uuid}`;
           }
         },
-        license: null,
-        copyright: null,
-        copyright_email: null,
         supports: [],
         attributes: [],
-        depends: [],
         groups: [],
         status: 'loaded',
         controls: [
@@ -147,23 +151,29 @@ export class FortifyMapper extends BaseConverter {
             arrayTransformer: filterVuln,
             path: 'FVDL.Description',
             key: 'id',
-            id: {path: 'classID'},
-            title: {path: 'Abstract', transformer: parseHtml},
-            desc: {path: 'Explanation', transformer: parseHtml},
-            impact: {path: '$.FVDL.Vulnerabilities.Vulnerability'},
             tags: {
-              nist: {transformer: nistTag}
+              nist: {transformer: nistTag},
+              cci: {
+                transformer: (data: Record<string, unknown>) =>
+                  getCCIsForNISTTags(nistTag(data))
+              }
             },
-            descriptions: [],
             refs: [],
             source_location: {},
-            code: '',
+            title: {path: 'Abstract', transformer: parseHtml}, // there are embedded nodes that do not show up properly
+            id: {path: 'classID'},
+            desc: {path: 'Explanation', transformer: parseHtml},
+            impact: {path: '$.FVDL.Vulnerabilities.Vulnerability'},
+            code: {
+              transformer: (vulnerability: Record<string, unknown>): string => {
+                return JSON.stringify(vulnerability, null, 2);
+              }
+            },
             results: [
               {
                 path: '$.FVDL.Snippets.Snippet',
                 status: ExecJSON.ControlResultStatus.Failed,
                 code_desc: {transformer: processEntry},
-                run_time: 0,
                 start_time: {
                   path: '$.FVDL.CreatedTS',
                   transformer: (input: unknown): string => {
@@ -176,13 +186,40 @@ export class FortifyMapper extends BaseConverter {
         ],
         sha256: ''
       }
-    ]
+    ],
+    passthrough: {
+      transformer: (data: Record<string, unknown>): Record<string, unknown> => {
+        let auxData = _.get(data, 'FVDL');
+        if (_.isObject(auxData)) {
+          auxData = _.omit(auxData, [
+            'CreatedTS',
+            'UUID',
+            'Description',
+            'Snippets'
+          ]);
+        }
+        return {
+          auxiliary_data: [
+            {
+              name: 'Fortify',
+              data: {FVDL: auxData}
+            }
+          ],
+          ...(this.withRaw && {raw: data})
+        };
+      }
+    }
   };
-  constructor(fvdl: string) {
-    super(parseXml(fvdl));
+  constructor(fvdl: string, withRaw = false) {
+    super(
+      parseXml(fvdl, {
+        stopNodes: ['FVDL.Description.Abstract', 'FVDL.Description.Explanation']
+      })
+    );
     this.startTime = `${_.get(this.data, 'FVDL.CreatedTS.date')} ${_.get(
       this.data,
       'FVDL.CreatedTS.time'
     )}`;
+    this.withRaw = withRaw;
   }
 }

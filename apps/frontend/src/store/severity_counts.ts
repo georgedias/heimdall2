@@ -10,7 +10,7 @@ import {
 } from '@/store/data_filters';
 import Store from '@/store/store';
 import {Severity} from 'inspecjs';
-import LRUCache from 'lru-cache';
+import {LRUCache} from 'lru-cache';
 import {getModule, Module, VuexModule} from 'vuex-module-decorators';
 
 // The hash that we will generally be working with herein
@@ -54,7 +54,7 @@ export class SeverityCount extends VuexModule {
   /** Generates a hash mapping each status -> a count of its members */
   get hash(): (filter: Filter) => SeverityHash {
     // Establish our cache and dependency
-    const cache: LRUCache<string, SeverityHash> = new LRUCache(30);
+    const cache: LRUCache<string, SeverityHash> = new LRUCache({max: 30});
 
     return (filter: Filter) => {
       const id = filter_cache_key(filter);

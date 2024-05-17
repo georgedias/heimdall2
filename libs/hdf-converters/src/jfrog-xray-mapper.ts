@@ -1,5 +1,5 @@
 import {ExecJSON} from 'inspecjs';
-import _ from 'lodash';
+import * as _ from 'lodash';
 import {version as HeimdallToolsVersion} from '../package.json';
 import {
   BaseConverter,
@@ -9,7 +9,10 @@ import {
   MappedTransform
 } from './base-converter';
 import {CweNistMapping} from './mappings/CweNistMapping';
-import {DEFAULT_STATIC_CODE_ANALYSIS_NIST_TAGS} from './utils/global';
+import {
+  DEFAULT_STATIC_CODE_ANALYSIS_NIST_TAGS,
+  getCCIsForNISTTags
+} from './utils/global';
 
 // Constants
 const IMPACT_MAPPING: Map<string, number> = new Map([
@@ -18,20 +21,27 @@ const IMPACT_MAPPING: Map<string, number> = new Map([
   ['low', 0.3]
 ]);
 
+const CWE_PATH = 'component_versions.more_details.cves[0].cwe';
+
 const CWE_NIST_MAPPING = new CweNistMapping();
 
 // Transformation Functions
 function hashId(vulnerability: unknown): string {
   if (_.get(vulnerability, 'id') === '') {
-    return generateHash(_.get(vulnerability, 'summary').toString(), 'md5');
+    return generateHash(
+      (_.get(vulnerability, 'summary') as unknown as string).toString(),
+      'md5'
+    );
   } else {
-    return _.get(vulnerability, 'id') as string;
+    return _.get(vulnerability, 'id') as unknown as string;
   }
 }
 function formatDesc(vulnerability: unknown): string {
   const text = [];
   if (_.has(vulnerability, 'description')) {
-    text.push(_.get(vulnerability, 'description').toString());
+    text.push(
+      (_.get(vulnerability, 'description') as unknown as string).toString()
+    );
   }
   if (_.has(vulnerability, 'cves')) {
     const re1 = /":/gi;
@@ -127,11 +137,16 @@ export class JfrogXrayMapper extends BaseConverter {
             path: 'data',
             key: 'id',
             tags: {
+              cci: {
+                path: CWE_PATH,
+                transformer: (identifier: Record<string, unknown>) =>
+                  getCCIsForNISTTags(nistTag(identifier))
+              },
               nist: {
-                path: 'component_versions.more_details.cves[0].cwe',
+                path: CWE_PATH,
                 transformer: nistTag
               },
-              cweid: {path: 'component_versions.more_details.cves[0].cwe'}
+              cweid: {path: CWE_PATH}
             },
             refs: [],
             source_location: {},

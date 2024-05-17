@@ -1,5 +1,5 @@
 import {encode} from 'html-entities';
-import _ from 'lodash';
+import * as _ from 'lodash';
 
 const desc = () => ' ';
 
@@ -8,7 +8,7 @@ function subfindingsCodeDesc(finding: unknown) {
 }
 
 function findingId(finding: unknown) {
-  const generatorId = _.get(finding, 'GeneratorId');
+  const generatorId = _.get(finding, 'GeneratorId') as unknown as string;
   const hyphenIndex = generatorId.indexOf('-');
   return encode(generatorId.slice(hyphenIndex + 1));
 }

@@ -7,12 +7,13 @@ import {JwtService} from '@nestjs/jwt';
 import {compare} from 'bcryptjs';
 import * as crypto from 'crypto';
 import jwt from 'jsonwebtoken';
-import _ from 'lodash';
+import * as _ from 'lodash';
 import moment from 'moment';
 import ms from 'ms';
 import winston from 'winston';
 import {ApiKeyService} from '../apikeys/apikey.service';
 import {ConfigService} from '../config/config.service';
+import {Group} from '../groups/group.model';
 import {limitJWTTime} from '../token/token.providers';
 import {CreateUserDto} from '../users/dto/create-user.dto';
 import {User} from '../users/user.model';
@@ -20,6 +21,7 @@ import {UsersService} from '../users/users.service';
 
 @Injectable()
 export class AuthnService {
+  private readonly line = '_______________________________________________\n';
   public loggingTimeFormat = 'MMM-DD-YYYY HH:mm:ss Z';
   public logger = winston.createLogger({
     transports: [new winston.transports.Console()],
@@ -27,7 +29,10 @@ export class AuthnService {
       winston.format.timestamp({
         format: this.loggingTimeFormat
       }),
-      winston.format.printf((info) => `[${[info.timestamp]}] ${info.message}`)
+      winston.format.printf(
+        (info) =>
+          `${this.line}[${[info.timestamp]}] (Authn Service): ${info.message}`
+      )
     )
   });
 
@@ -53,7 +58,7 @@ export class AuthnService {
     }
   }
 
-  async validateApiKey(apikey: string): Promise<User | null> {
+  async validateApiKey(apikey: string): Promise<User | Group | null> {
     const APIKeySecret = this.configService.get('API_KEY_SECRET');
     if (APIKeySecret) {
       try {
@@ -68,10 +73,18 @@ export class AuthnService {
             jwtPayload.keyId
           );
           if (await compare(JWTSignature, matchingKey.apiKey)) {
-            return matchingKey.user;
+            if (matchingKey.type === 'user') {
+              return matchingKey.user;
+            } else if (matchingKey.type === 'group') {
+              return matchingKey.group;
+            } else {
+              return null;
+            }
           } else {
             return null;
           }
+        } else {
+          return null;
         }
       } catch {
         return null;
@@ -81,7 +94,6 @@ export class AuthnService {
         'API Keys have been disabled as the API-Key secret is not set'
       );
     }
-    return null;
   }
 
   async validateOrCreateUser(

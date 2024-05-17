@@ -233,7 +233,7 @@ import {
 import Base from '@/views/Base.vue';
 import {IEvaluation} from '@heimdall/interfaces';
 import {ControlStatus} from 'inspecjs';
-import _ from 'lodash';
+import * as _ from 'lodash';
 import Vue from 'vue';
 import Component from 'vue-class-component';
 import {Watch} from 'vue-property-decorator';
@@ -326,7 +326,7 @@ export default class Compare extends Vue {
       // loaded then something has been added/removed and should be displayed.
       return (
         controls.some((control) => control !== controls[0]) ||
-        controls.length !== FilteredDataModule.selected_file_ids.length
+        controls.length !== this.files.length
       );
     });
   }
@@ -376,7 +376,7 @@ export default class Compare extends Vue {
     this.files.forEach((file) => {
       if ('passthrough' in file.evaluation.data) {
         const passthroughData = _.get(file.evaluation.data, 'passthrough');
-        if (typeof passthroughData === 'object') {
+        if (_.isObject(passthroughData)) {
           this.compareItems = this.compareItems.concat(
             Object.keys(passthroughData)
               .filter(
@@ -405,16 +405,23 @@ export default class Compare extends Vue {
     const field = this.sortControlSetsBy.split('Passthrough Field: ')[1];
     const aPassthroughField = _.get(a.data, `passthrough.${field}`);
     const bPassthroughField = _.get(b.data, `passthrough.${field}`);
-    if (typeof aPassthroughField === typeof bPassthroughField) {
+    if (
+      aPassthroughField !== null &&
+      bPassthroughField !== null &&
+      aPassthroughField !== undefined &&
+      bPassthroughField !== undefined &&
+      aPassthroughField === typeof bPassthroughField
+    ) {
       if (typeof aPassthroughField === 'string') {
-        return aPassthroughField.localeCompare(bPassthroughField);
+        return (aPassthroughField as string).localeCompare(
+          bPassthroughField as string
+        );
       } else if (typeof aPassthroughField === 'number') {
-        return aPassthroughField - bPassthroughField;
+        return aPassthroughField - Number(bPassthroughField);
       } else if (typeof aPassthroughField === 'boolean') {
         return Number(aPassthroughField) - Number(bPassthroughField);
       }
     }
-
     return 0;
   }
 

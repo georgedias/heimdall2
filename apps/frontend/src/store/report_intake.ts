@@ -9,8 +9,12 @@ import {read_file_async} from '@/utilities/async_util';
 import {
   ASFFResults as ASFFResultsMapper,
   BurpSuiteMapper,
+  ChecklistResults,
+  ConveyorResults as ConveyorResultsMapper,
   DBProtectMapper,
   fingerprint,
+  FortifyMapper,
+  GoSecMapper,
   INPUT_TYPES,
   IonChannelMapper,
   JfrogXrayMapper,
@@ -21,7 +25,7 @@ import {
   SarifMapper,
   ScoutsuiteMapper,
   SnykResults,
-  TwistlockMapper,
+  TwistlockResults,
   VeracodeMapper,
   XCCDFResultsMapper,
   ZapMapper
@@ -36,7 +40,7 @@ import {
   convertFile,
   ExecJSON
 } from 'inspecjs';
-import _ from 'lodash';
+import * as _ from 'lodash';
 import {v4 as uuid} from 'uuid';
 import {Action, getModule, Module, VuexModule} from 'vuex-module-decorators';
 import {FilteredDataModule} from './data_filters';
@@ -229,6 +233,10 @@ export class InspecIntake extends VuexModule {
         return Object.values(
           new ASFFResultsMapper(convertOptions.data).toHdf()
         );
+      case INPUT_TYPES.CONVEYOR:
+        return Object.values(
+          new ConveyorResultsMapper(convertOptions.data).toHdf()
+        );
       case INPUT_TYPES.ZAP:
         return new ZapMapper(convertOptions.data).toHdf();
       case INPUT_TYPES.NIKTO:
@@ -238,7 +246,7 @@ export class InspecIntake extends VuexModule {
       case INPUT_TYPES.SNYK:
         return new SnykResults(convertOptions.data).toHdf();
       case INPUT_TYPES.TWISTLOCK:
-        return new TwistlockMapper(convertOptions.data).toHdf();
+        return new TwistlockResults(convertOptions.data).toHdf();
       case INPUT_TYPES.NESSUS:
         return new NessusResults(convertOptions.data).toHdf();
       case INPUT_TYPES.XCCDF:
@@ -255,8 +263,14 @@ export class InspecIntake extends VuexModule {
         return new NetsparkerMapper(convertOptions.data).toHdf();
       case INPUT_TYPES.PRISMA:
         return new PrismaMapper(convertOptions.data).toHdf();
-      case 'veracode':
+      case INPUT_TYPES.VERACODE:
         return new VeracodeMapper(convertOptions.data).toHdf();
+      case INPUT_TYPES.FORTIFY:
+        return new FortifyMapper(convertOptions.data).toHdf();
+      case INPUT_TYPES.CHECKLIST:
+        return new ChecklistResults(convertOptions.data).toHdf();
+      case INPUT_TYPES.GOSEC:
+        return new GoSecMapper(convertOptions.data).toHdf();
       default:
         return SnackbarModule.failure(
           `Invalid file uploaded (${filename}), no fingerprints matched.`

@@ -57,11 +57,26 @@
         </template>
 
         <template #id>
-          <ColumnHeader
-            text="ID"
-            :sort="sortId"
-            @input="set_sort('id', $event)"
-          />
+          <v-row class="pa-3">
+            <ColumnHeader
+              text="ID"
+              :sort="sortId"
+              @input="set_sort('id', $event)"
+            />
+            <v-tooltip bottom>
+              <template #activator="{on, attrs}">
+                <v-icon
+                  class="ml-0"
+                  small
+                  style="cursor: pointer"
+                  v-bind="attrs"
+                  v-on="on"
+                  >mdi-information-outline</v-icon
+                >
+              </template>
+              <span>ID <br />(Legacy ID) </span>
+            </v-tooltip>
+          </v-row>
         </template>
 
         <template #severity>
@@ -93,7 +108,7 @@
             text="Controls Viewed"
             sort="disabled"
             :viewed-header="true"
-            :number-of-viewed-controls="viewedControlIds.length"
+            :number-of-viewed-controls="numOfViewed"
             :number-of-all-controls="raw_items.length"
           />
         </template>
@@ -139,7 +154,7 @@ import {HeightsModule} from '@/store/heights';
 import {getControlRunTime} from '@/utilities/delta_util';
 import {control_unique_key} from '@/utilities/format_util';
 import {ContextualizedControl} from 'inspecjs';
-import _ from 'lodash';
+import * as _ from 'lodash';
 import Vue from 'vue';
 import Component from 'vue-class-component';
 import {Prop, Ref} from 'vue-property-decorator';
@@ -191,6 +206,12 @@ export default class ControlTable extends Vue {
   // Used for viewed/unviewed controls.
   viewedControlIds: string[] = [];
   displayUnviewedControls = true;
+
+  get numOfViewed() {
+    return this.raw_items.filter((elem) =>
+      this.viewedControlIds.some((id) => elem.control.data.id === id)
+    ).length;
+  }
 
   toggleControlViewed(control: ContextualizedControl) {
     const alreadyViewed = this.viewedControlIds.indexOf(control.data.id);
@@ -343,7 +364,10 @@ export default class ControlTable extends Vue {
         severity_val: ['none', 'low', 'medium', 'high', 'critical'].indexOf(
           d.root.hdf.severity
         ),
-        filename: _.get(d, 'sourcedFrom.sourcedFrom.from_file.filename')
+        filename: _.get(
+          d,
+          'sourcedFrom.sourcedFrom.from_file.filename'
+        ) as unknown as string
       };
     });
   }

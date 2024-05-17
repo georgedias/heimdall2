@@ -1,5 +1,7 @@
-import {ForbiddenError} from '@casl/ability';
+import {ForbiddenError, Subject} from '@casl/ability';
+import {IEvalPaginationParams} from '@heimdall/interfaces';
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -7,13 +9,14 @@ import {
   Param,
   Post,
   Put,
+  Query,
   Request,
   UploadedFiles,
   UseGuards,
   UseInterceptors
 } from '@nestjs/common';
 import {AnyFilesInterceptor} from '@nestjs/platform-express';
-import _ from 'lodash';
+import * as _ from 'lodash';
 import {AuthzService} from '../authz/authz.service';
 import {Action} from '../casl/casl-ability.factory';
 import {ConfigService} from '../config/config.service';
@@ -26,8 +29,9 @@ import {CreateEvaluationInterceptor} from '../interceptors/create-evaluation-int
 import {LoggingInterceptor} from '../interceptors/logging.interceptor';
 import {User} from '../users/user.model';
 import {CreateEvaluationDto} from './dto/create-evaluation.dto';
-import {EvaluationDto} from './dto/evaluation.dto';
+import {EvaluationDto, IEvaluationResponse} from './dto/evaluation.dto';
 import {UpdateEvaluationDto} from './dto/update-evaluation.dto';
+import {Evaluation} from './evaluation.model';
 import {EvaluationsService} from './evaluations.service';
 
 @Controller('evaluations')
@@ -39,7 +43,8 @@ export class EvaluationsController {
     private readonly configService: ConfigService,
     private readonly authz: AuthzService
   ) {}
-  @UseGuards(JwtAuthGuard)
+
+  @UseGuards(APIKeyOrJwtAuthGuard)
   @Get(':id')
   async findById(
     @Param('id') id: string,
@@ -67,8 +72,8 @@ export class EvaluationsController {
     return evaluationGroups.map((group) => new GroupDto(group));
   }
 
-  @UseGuards(JwtAuthGuard)
-  @Get()
+  @UseGuards(APIKeyOrJwtAuthGuard)
+  @Get('e2e')
   async findAll(@Request() request: {user: User}): Promise<EvaluationDto[]> {
     const abac = this.authz.abac.createForUser(request.user);
     let evaluations = await this.evaluationsService.findAll();
@@ -84,6 +89,50 @@ export class EvaluationsController {
   }
 
   @UseGuards(APIKeyOrJwtAuthGuard)
+  @Get()
+  async findAndCountAll(
+    @Query() params: IEvalPaginationParams,
+    @Request() request: {user: User}
+  ): Promise<IEvaluationResponse> {
+    const abac = this.authz.abac.createForUser(request.user);
+    let evaluations: Evaluation[] = [];
+    let totalItems = 0;
+
+    if (params.useClause) {
+      const response = await this.evaluationsService.getEvaluationsWithClause(
+        params,
+        request.user.email,
+        request.user.role
+      );
+      evaluations = response.evaluations;
+      totalItems = response.totalItems;
+    } else {
+      const response = await this.evaluationsService.getAllEvaluations(
+        params,
+        request.user.email,
+        request.user.role
+      );
+      evaluations = response.evaluations;
+      totalItems = response.totalItems;
+    }
+
+    // Perform an policy-based access control (AKA Attribute-based access control)
+    // Show public evaluations, evaluations that belong to a group the logged-in user
+    // belongs too, or those created by logged-in user.
+    evaluations = evaluations.filter((evaluation: Subject) =>
+      abac.can(Action.Read, evaluation)
+    );
+
+    return {
+      evaluations: evaluations.map(
+        (evaluation: Evaluation) =>
+          new EvaluationDto(evaluation, abac.can(Action.Update, evaluation))
+      ),
+      totalCount: totalItems
+    };
+  }
+
+  @UseGuards(APIKeyOrJwtAuthGuard)
   @Post()
   @UseInterceptors(
     AnyFilesInterceptor({limits: {files: 100}}),
@@ -92,7 +141,7 @@ export class EvaluationsController {
   async create(
     @Body() createEvaluationDto: CreateEvaluationDto,
     @UploadedFiles() data: Express.Multer.File[],
-    @Request() request: {user: User}
+    @Request() request: {user: User | Group}
   ): Promise<EvaluationDto | EvaluationDto[]> {
     const uploadedFiles = data.map(async (file) => {
       let serializedDta: Record<string, unknown>;
@@ -102,38 +151,70 @@ export class EvaluationsController {
         serializedDta = {originalResultsData: file.buffer.toString('utf8')};
       }
 
-      let groups: Group[] = createEvaluationDto.groups
-        ? await this.groupsService.findByIds(createEvaluationDto.groups)
-        : [];
-      // Make sure the user can add evaluations to each group
-      const abac = this.authz.abac.createForUser(request.user);
-      groups = groups.filter((group) => {
-        return abac.can(Action.AddEvaluation, group);
-      });
-      const evaluation = await this.evaluationsService
-        .create({
-          // Only respect custom file names for single file uploads
-          filename:
-            data.length > 1 ? file.originalname : createEvaluationDto.filename, // lgtm [js/type-confusion-through-parameter-tampering]
-          evaluationTags: createEvaluationDto.evaluationTags || [],
-          public: createEvaluationDto.public,
-          data: serializedDta,
-          userId: request.user.id // Do not include userId on the DTO so we can set it automatically to the uploader's id.
-        })
-        .then((createdEvaluation) => {
-          groups.forEach((group) =>
-            this.groupsService.addEvaluationToGroup(group, createdEvaluation)
-          );
-          return createdEvaluation;
+      // If the "user" is a group, we'll add the evaluation to the group, and ignore any other groups
+      if (request.user instanceof Group) {
+        const evaluation = await this.evaluationsService
+          .create({
+            // Only respect custom file names for single file uploads
+            filename:
+              data.length > 1
+                ? file.originalname
+                : createEvaluationDto.filename, // lgtm [js/type-confusion-through-parameter-tampering]
+            evaluationTags: createEvaluationDto.evaluationTags || [],
+            public: createEvaluationDto.public,
+            data: serializedDta,
+            groupId: request.user.id
+          })
+          .then(async (evaluation) => {
+            const group = await this.groupsService.findByPkBang(
+              request.user.id
+            );
+            this.groupsService.addEvaluationToGroup(group, evaluation);
+            return evaluation;
+          })
+          .catch((err) => {
+            throw new BadRequestException(err.message);
+          });
+
+        const createdDto = new EvaluationDto(evaluation, true);
+
+        return _.omit(createdDto, 'data');
+      } else {
+        let groups: Group[] = createEvaluationDto.groups
+          ? await this.groupsService.findByIds(createEvaluationDto.groups)
+          : [];
+        // Make sure the user can add evaluations to each group
+        const abac = this.authz.abac.createForUser(request.user);
+        groups = groups.filter((group) => {
+          return abac.can(Action.AddEvaluation, group);
         });
-      const createdDto: EvaluationDto = new EvaluationDto(
-        evaluation,
-        true,
-        `${this.configService.get('EXTERNAL_URL') || ''}/results/${
-          evaluation.id
-        }`
-      );
-      return _.omit(createdDto, 'data');
+        const evaluation = await this.evaluationsService
+          .create({
+            // Only respect custom file names for single file uploads
+            filename:
+              data.length > 1
+                ? file.originalname
+                : createEvaluationDto.filename, // lgtm [js/type-confusion-through-parameter-tampering]
+            evaluationTags: createEvaluationDto.evaluationTags || [],
+            public: createEvaluationDto.public,
+            data: serializedDta,
+            userId: request.user.id // Do not include userId on the DTO so we can set it automatically to the uploader's id.
+          })
+          .then((createdEvaluation) => {
+            groups.forEach((group) =>
+              this.groupsService.addEvaluationToGroup(group, createdEvaluation)
+            );
+            return createdEvaluation;
+          });
+        const createdDto: EvaluationDto = new EvaluationDto(
+          evaluation,
+          true,
+          `${this.configService.get('EXTERNAL_URL') || ''}/results/${
+            evaluation.id
+          }`
+        );
+        return _.omit(createdDto, 'data');
+      }
     });
     if (uploadedFiles.length === 1) {
       return uploadedFiles[0];

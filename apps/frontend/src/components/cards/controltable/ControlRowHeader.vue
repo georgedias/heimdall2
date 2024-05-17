@@ -70,7 +70,12 @@
     <!-- ID and Tags -->
     <template #id>
       <v-card-text class="pa-2 title font-weight-bold">
-        {{ control.data.id }}
+        <div>
+          {{ control.data.id }}
+        </div>
+        <div v-if="showLegacy(control)">
+          {{ showLegacy(control) }}
+        </div>
       </v-card-text>
     </template>
     <template #tags>
@@ -134,7 +139,7 @@ import {CCI_DESCRIPTIONS} from '@/utilities/cci_util';
 import {getControlRunTime} from '@/utilities/delta_util';
 import {nistCanonConfig, NIST_DESCRIPTIONS} from '@/utilities/nist_util';
 import {ContextualizedControl, is_control, parse_nist} from 'inspecjs';
-import _ from 'lodash';
+import * as _ from 'lodash';
 import Component, {mixins} from 'vue-class-component';
 import {Prop} from 'vue-property-decorator';
 
@@ -262,6 +267,20 @@ export default class ControlRowHeader extends mixins(HtmlSanitizeMixin) {
     return cci_tags.map((cci) => {
       return {label: cci, url: '', description: this.descriptionForTag(cci)};
     });
+  }
+
+  showLegacy(control: ContextualizedControl) {
+    let legacyTag = control.data.tags['legacy'];
+    if (!legacyTag) {
+      return '';
+    }
+    if (!Array.isArray(legacyTag)) {
+      legacyTag = [legacyTag];
+    }
+    const legacyID = legacyTag.find(
+      (ele: unknown) => _.isString(ele) && ele.startsWith('V-')
+    );
+    return legacyID ? '(' + legacyID + ')' : '';
   }
 }
 </script>

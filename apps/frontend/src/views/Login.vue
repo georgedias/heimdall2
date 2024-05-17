@@ -28,13 +28,13 @@
                   v-if="anyAuthProvidersAvailable"
                   id="select-tab-standard-login"
                   href="#login-standard"
-                  >Heimdall Login</v-tab
+                  >Heimdall Login (Local Authorization)</v-tab
                 >
                 <v-tab
                   v-if="ldapenabled"
                   id="select-tab-ldap-login"
                   href="#login-ldap"
-                  >Organization Login</v-tab
+                  >Organization Login (LDAP Authorization)</v-tab
                 >
 
                 <v-tab-item value="login-standard">
@@ -69,7 +69,7 @@ const lastLoginTab = new LocalStorageVal<string>('login_curr_tab');
   }
 })
 export default class Login extends Vue {
-  activeTab: string = lastLoginTab.get_default(
+  activeTab: string = lastLoginTab.getDefault(
     this.anyAuthProvidersAvailable ? 'logintab-standard' : 'login-ldap'
   );
 
@@ -89,7 +89,7 @@ export default class Login extends Vue {
   checkForAuthenticationError() {
     if (this.$cookies.get('authenticationError')) {
       SnackbarModule.failure(
-        `Sorry, an problem occurred while signing you in. The reason given was: ${this.$cookies.get(
+        `Sorry, a problem occurred while signing you in. The reason given was: ${this.$cookies.get(
           'authenticationError'
         )}`
       );
